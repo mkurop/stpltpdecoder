@@ -11,9 +11,10 @@ from typing import Tuple
 
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import deconvolve, lfiltic, lfilter
+from scipy.signal import deconvolve, lfilter, lfiltic
 
 from spectrum import *
+
 
 def lpanafil(s : np.ndarray, a : np.ndarray, hlp : np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Computes the short term residual given Short Term Predictor (STP) parameters and an initial state.
@@ -103,11 +104,11 @@ class StpLtpEncoder:
 
         def reset_state(self):
 
-            self.lsf = np.linspace(0.2, np.pi - 0.1, self.cfg.p) 
+            self.lsf = np.linspace(0.2, np.pi - 0.1, self.cfg.p) # LSF parameters from the previous frame
 
-            self.hlp = np.zeros((self.cfg.p,)) 
+            self.hlp = np.zeros((self.cfg.p,)) # initial conditions for the STP analysis 
 
-            short_term_res = np.random.randn((self.cfg.pitch_lag_max,)))*1e-6
+            short_term_res = np.random.randn((self.cfg.pitch_lag_max,))*1e-6 # initial conditions for the LTP analysis
 
 
     def __init__(self, sampling_rate: int = 16000):
@@ -261,129 +262,75 @@ class StpLetDecoder:
 
         self.state = DecoderState(sampling_rate)
 
-    def frame(parameters_from_encoder):
+    def frame(parameters) -> np.ndarray:
+        """STP/LTP synthesis procedure for one frame
+
+        :param parameters: an input parameters structure with the fields
+            * lsf - the line spectral frequency parameters in subframes, matrix with dimension p x subframes  \
+            where subframes is the number of subframes per frame and p is the STP order
+            * a - the STP polynomial coefficients in subframes, matrix with dimension (p+1) x subframes 
+            * ltp_lags - the LTP predictor lags
+            * ltp_taps - the LTP predictor taps
+            * ltp_variances - variances of the excitation
+            * current_frame_long_term_res - the LTP residual, the excitation signal
+
+        :return: decoder output signal frame
+        :rtype: np.ndarray 
+        """
+
+        output_signal_frame = np.zeros((self.cfg.frame,))
 
         for i in range(self.cfg.subframes):
 
             # LTP synthesis -------------------------------
 
-            short_term_residual = parameeters_from_encoder
+            short_term_residual = np.sqrt(parameters.ltp_variances[i]) * parameters.current_frame_long_term_res[i*self.cfg.subframe:(i+1)*self.cfg.subframe]
 
+            beg1 = self.cfg.pitch_lag_max-parameters.ltp_lags[i]
 
+            end1 = np.min(self.cfg.pitch_lag_max, beg1 + self.cfg.subframe)
 
+            aux_vector1 = parameters.ltp_taps[i] * self.state.short_term_res[beg1:end1]
 
+            aux1 = end1 - beg1
 
+            short_term_residual[:aux1] += aux_vector1
 
+            beg2 = aux1 - parameters.ltp_lags[i]
 
+            end2 = self.cfg.subframe - parameters.ltp_lags[i]
 
+            if beg2 < 0:
+                
+                len1 = -beg2
 
+                aux2 = np.min(self.cfg.subframe,aux1+len1)
 
+                short_term_residual[aux1:aux2] = parameters.ltp_taps[i] * self.state.short_term_res[self.cfg.pitch_lag_max + beg2:]
 
+                len3 = self.cfg.subframe - aux2
+                
+                beg3 = aux2 - parameters.ltp_lags[i]
 
+                end3 = beg3 + len3
 
+                short_term_residual[aux2:] = parameters.ltp_taps[i] * short_term_residual[beg3:end3] 
 
+            else:
 
+                short_term_residual[aux1:] = parameters.ltp_taps[i] * short_term_residual[beg2:end2]
 
+            # update state
 
+            self.state.short_term_res = np.concatenate(self.state.short_term_res[self.cfg.subframe:], short_term_residual)
 
+            # STP synthesis ----------------------------------
 
+            # recreate the output frame and update initial conditions for the STP synthesis filter
 
+            [output_signal_frame[i*self.cfg.subframe:(i+1)*self.cfg.subframe], self.state.hlp] = lfilter([1.0],parameters.a[:,i].ravel(),short_term_residual,zi = self.state.hlp)
 
-
-
-
-
-
-
-def InitDecStat(p,Frame):
-    """Function initializing the decoder
-    Input:
-    p - AR model order
-    Frame - length of the frame
-    Author: Marcin Kuropatwiński
-    Created: 31.03.2014
-    """
-    DecStat = col.namedtuple('DecStat','LsfQ, hlp, ShortTermRes')
-    DecStat = DecStat(LsfQ = np.linspace(0.2,np.pi-0.1,p), hlp = np.zeros((p,)), ShortTermRes = np.zeros((Frame,)))
-    return DecStat
-
-
-def Decoder(LongTermRes,Par,DecStat,p,SubFrames,SubFramesOL):
-
-    """
-    Function for decoding speech based on the input from the complementary function Encoder.
-
-    Input:
-    LongTermRes - a frame of the long term residual
-    Par - parameters structure
-    DecState - structure of the decoder state with the following fields
-
-    hlp - short term residual synthesis filter state
-    ShortTermRes - previous frame of the short term residual
-
-    Remaining inputs are obvious, see the Encoder function.
-
-    Output:
-
-    fs - current frame synthesized speech
-    DecState - decoder state structure
-
-    Author: Marcin Kuropatwinski
-    Created: 31.03.2014
-    """
-    #declare output DecStat
-    DecStatOut = col.namedtuple('DecStatOut','LsfQ, hlp, ShortTermRes')
-
-    #length of the step
-    Frame = len(LongTermRes)
-    #number of subframes per frame
-    n = SubFrames
-    #length of the subframe
-    sfl = Frame/n
-    np_ = SubFramesOL # number of open loop frames
-    # length of the open loop pitch subframe
-    sflp = Frame/np_
-
-    # get the current frame parameters
-    LsfQ = Par.LsfQ
-    LtpLag = Par.LtpLag
-    LtpTap = Par.LtpTap
-    LtpVar = Par.LtpVar
-    hlp = copy.copy(DecStat.hlp)
-
-
-    #resynthesise speech
-    #initial state of the long term synthesis filter - length of 2 frames
-    ssr = np.concatenate([DecStat.ShortTermRes,np.zeros((Frame,))],axis=0)
-
-    #resynthesise frame of the short term residual
-    start = 0
-    for i in range(np_):
-        #    print len(LtpLag), len(LtpVar), len(LtpTap)
-        for j in range(i*sflp,(i+1)*sflp):
-            #raw_input()
-            ssr[Frame+j] = np.sqrt(LtpVar[i])*LongTermRes[start+j] - \
-            LtpTap[i]*ssr[Frame+j-LtpLag[i]]
-
-    ShortTermRes = ssr[Frame:]
-    aslpq = DecStat.LsfQ
-    aslq = np.array(LsfQ,ndmin=1)
-
-    LsfQ = aslq
-    ic = 1./n
-    fs = np.zeros((Frame,))
-    for i in range(n):
-        asli = (1-(i+1)*ic)*aslpq + (i+1)*ic*aslq
-        # convert back into lpc domain
-        a = lsf2poly(asli)
-        for j in range(i*sfl,(i+1)*sfl):
-            fs[j] = -np.sum(a[1:]*hlp) + ssr[Frame+j]
-            hlp[1:] = hlp[:-1]
-            hlp[0] = fs[j]
-
-    DecStatOut = DecStatOut(LsfQ = LsfQ, hlp = hlp, ShortTermRes = ShortTermRes)
-
-    return fs, DecStatOut
+        return output_signal_frame
 
 if __name__ == "__main__":
     sr, s = wavfile.read("VLRecording10591_05.04.13_25.168.wav")
