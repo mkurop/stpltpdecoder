@@ -2,7 +2,7 @@
  
 __author__ = 'Marcin Kuropatwiński'
 
-"""Module for the computation of the Short Term Predictor and the Long Term Predictorparameters. \
+"""Module for the computation of the Short Term Predictor and the Long Term Predictor parameters. \
 Provided classes for encoder and decoder work for any specified sampling frequency.
 
 Created 31.03.2014 Code modernized 22.05.2021"""
@@ -11,7 +11,7 @@ from typing import Tuple
 
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import deconvolve
+from scipy.signal import deconvolve, lfiltic, lfilter
 
 from spectrum import *
 
@@ -88,7 +88,7 @@ class StpLtpEncoder:
     """
 
     class EncoderState:
-        """Class holding the state of the encoder, which changes from frame to frame
+        """Class holding the state of encoder, which changes from frame to frame
 
         :param sampling_rate: sampling rate in Hz of the signal processed
         :type sampling_rate: int
@@ -107,7 +107,7 @@ class StpLtpEncoder:
 
             self.hlp = np.zeros((self.cfg.p,)) 
 
-            short_term_res = np.zeros((self.cfg.pitch_lag_max,)))
+            short_term_res = np.random.randn((self.cfg.pitch_lag_max,)))*1e-6
 
 
     def __init__(self, sampling_rate: int = 16000):
@@ -127,8 +127,9 @@ class StpLtpEncoder:
         :param signal_frame: samples in the signal frame
         :type signal_frame: np.ndarray
         :return: structure with fields
-            * lsf - the line spectral frequency parameters
-            * a - the STP polynomial coefficients
+            * lsf - the line spectral frequency parameters in subframes, matrix with dimension p x subframes  \
+            where subframes is the number of subframes per frame and p is the STP order
+            * a - the STP polynomial coefficients in subframes, matrix with dimension (p+1) x subframes 
             * ltp_lags - the LTP predictor lags
             * ltp_taps - the LTP predictor taps
             * ltp_variances - variances of the excitation
@@ -218,14 +219,55 @@ class StpLtpEncoder:
         self.state.short_term_res = current_frame_short_term_res[-self.cfg.pitch_lag_max:]
         
         # fill output parameters structure
-        output_parameters.lsf = lsf
-        output_parameters.a = a
+        output_parameters.lsf = lsf_interpolated
+        output_parameters.a = a_interpolated
         output_parameters.ltp_lags = ltp_lags
         output_parameters.ltp_taps = ltp_taps
         output_parameters.ltp_variances = ltp_variances
         output_parameters.current_frame_long_term_res = current_frame_long_term_res
 
         return output_parameters
+
+
+class StpLetDecoder:
+
+    class DecoderState:
+        """Class holding the state of decoder, which changes from frame to frame
+
+        :param sampling_rate: sampling rate in Hz of the signal processed
+        :type sampling_rate: int
+        """
+
+        def __init__(self, sampling_rate : int):
+            """Constructor method"""
+
+            self.cfg = Config(sampling_rate)
+
+            self.reset_state()
+
+        def reset_state(self):
+
+            self.lsf = np.linspace(0.2, np.pi - 0.1, self.cfg.p) 
+
+            a = lsf2poly(self.lsf)
+
+            self.hlp = lfiltic([1.0], a, np.zeros((self.cfg.p,))) 
+
+            short_term_res = np.random.randn((self.cfg.pitch_lag_max,)))*1e-6
+
+    def __init__(self, sampling_rate : int):
+
+        self.cfg = Config(sampling_rate : int =16000)
+
+        self.state = DecoderState(sampling_rate)
+
+    def frame(parameters_from_encoder):
+
+        for i in range(self.cfg.subframes):
+
+            # LTP synthesis -------------------------------
+
+            short_term_residual = parameeters_from_encoder
 
 
 
