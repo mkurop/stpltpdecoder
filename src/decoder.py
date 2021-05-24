@@ -7,7 +7,8 @@ Provided classes for encoder and decoder work for any specified sampling frequen
 
 Created 31.03.2014 Code modernized 22.05.2021"""
 
-from typing import Tuple
+import os
+from typing import Tuple, List
 
 import numpy as np
 from scipy.io import wavfile
@@ -300,37 +301,80 @@ class StpLetDecoder:
 
             end2 = self.cfg.subframe - parameters.ltp_lags[i]
 
-            if beg2 < 0:
+            if aux1 < self.cfg.subframe:
+
+                # extend current frame short_term_residual with the past samples of the STP residual
+                short_term_residual = np.concatenate(self.state.short_term_res,short_term_residual)
                 
-                len1 = -beg2
+                aux2 = self.cfg.pitch_lag_max + aux1
 
-                aux2 = np.min(self.cfg.subframe,aux1+len1)
+                len1 = self.cfg.subframe - aux1
 
-                short_term_residual[aux1:aux2] = parameters.ltp_taps[i] * self.state.short_term_res[self.cfg.pitch_lag_max + beg2:]
+                beg2 = self.cfg.pitch_lag_max + aux1-parameters.ltp_lags[i]
 
-                len3 = self.cfg.subframe - aux2
-                
-                beg3 = aux2 - parameters.ltp_lags[i]
+                end2 = beg2 + len1 
 
-                end3 = beg3 + len3
+                short_term_residual[aux2:] += parameters.ltp_taps[i]*short_term_residual[beg2:end2]
 
-                short_term_residual[aux2:] = parameters.ltp_taps[i] * short_term_residual[beg3:end3] 
-
-            else:
-
-                short_term_residual[aux1:] = parameters.ltp_taps[i] * short_term_residual[beg2:end2]
+            #  if beg2 < 0:
+            #
+            #      len1 = -beg2
+            #
+            #      aux2 = np.min(self.cfg.subframe,aux1+len1)
+            #
+            #      short_term_residual[aux1:aux2] = parameters.ltp_taps[i] * self.state.short_term_res[self.cfg.pitch_lag_max + beg2:]
+            #
+            #      len3 = self.cfg.subframe - aux2
+            #
+            #      beg3 = aux2 - parameters.ltp_lags[i]
+            #
+            #      end3 = beg3 + len3
+            #
+            #      short_term_residual[aux2:] = parameters.ltp_taps[i] * short_term_residual[beg3:end3]
+            #
+            #  else:
+            #
+            #      short_term_residual[aux1:] = parameters.ltp_taps[i] * short_term_residual[beg2:end2]
 
             # update state
 
-            self.state.short_term_res = np.concatenate(self.state.short_term_res[self.cfg.subframe:], short_term_residual)
-
+            self.state.short_term_res = short_term_residual[self.cfg.subframe:] 
+            
             # STP synthesis ----------------------------------
 
             # recreate the output frame and update initial conditions for the STP synthesis filter
 
-            [output_signal_frame[i*self.cfg.subframe:(i+1)*self.cfg.subframe], self.state.hlp] = lfilter([1.0],parameters.a[:,i].ravel(),short_term_residual,zi = self.state.hlp)
+            [output_signal_frame[i*self.cfg.subframe:(i+1)*self.cfg.subframe], self.state.hlp] = lfilter([1.0],parameters.a[:,i].ravel(),short_term_residual[self.cfg.pitch_lag_max:],zi = self.state.hlp)
 
         return output_signal_frame
+
+def wav_files_in_directory(dir : str) -> List[str]:
+    """ Finds all files with the .wav extention in subdirectories of the dir folder.
+
+    :param dir: the folder to be searched over
+    :type dir: str
+
+    :return: the list of files with .wav extension found
+    :rtype: List[str]
+
+    :raises: 
+    """
+    
+    if not os.path.exists(dir):
+        raise ValueError(f"The directory {dir} does not exists.")
+
+    files_list = []
+
+    for roots,dirs,files in os.walk(dir):
+
+        for file_ in files:
+
+            if file_.endswith("WAV") or file_.enswith("wav"):
+
+                files_list.append(file_)
+
+    return files_list
+
 
 if __name__ == "__main__":
     sr, s = wavfile.read("VLRecording10591_05.04.13_25.168.wav")
