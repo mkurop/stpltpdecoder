@@ -357,7 +357,7 @@ def wav_files_in_directory(dir : str) -> List[str]:
     :return: the list of files with .wav extension found
     :rtype: List[str]
 
-    :raises: 
+    :raises ValueError: error raised if the provided directory does not exist
     """
     
     if not os.path.exists(dir):
