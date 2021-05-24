@@ -6,6 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
+# SpaceVim files
+.SpaceVim.d
+
+# output files 
+data/output/
 # Distribution / packaging
 .Python
 build/
