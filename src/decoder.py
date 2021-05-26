@@ -195,8 +195,6 @@ class StpLtpEncoder:
             # long term correlations
             aux_matrix1 = np.expand_dims(np.arange(self.cfg.subframe),0) + np.expand_dims(np.arange(self.cfg.pitch_lag_max-self.cfg.pitch_lag_min+1),0).T
 
-            #  print(aux_matrix1)
-
             aux_matrix2 = past_short_term_residual[aux_matrix1] 
 
             long_term_correlations = np.sum(aux_matrix2 * current_subframe,axis=1)
