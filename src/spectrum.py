@@ -1,10 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-__all__ = [xcorr, levinson, lsf2poly, poly2lsf]
+import numpy as np
+from scipy.signal import deconvolve
+
+__all__ = ['xcorr', 'levinson', 'lsf2poly', 'poly2lsf']
 
 def xcorr(x, y=None, maxlags=None, norm='biased'):
-    """Cross-correlation using numpy.correlate
+    """Cross-correlation using np.correlate
     Estimates the cross-correlation (and autocorrelation) sequence of a random
     process of length N. By default, there is no normalisation and the output
     sequence of the cross-correlation has a length 2*N+1.
@@ -22,7 +25,7 @@ def xcorr(x, y=None, maxlags=None, norm='biased'):
     However, in practice, only a finite segment of one realization of the
     infinite-length random process is available.
 
-    The correlation is estimated using numpy.correlate(x,y,'full').
+    The correlation is estimated using np.correlate(x,y,'full').
 
     Normalisation is handled by this function using the following cases:
         * 'biased': Biased estimate of the cross-correlation function
@@ -31,7 +34,7 @@ def xcorr(x, y=None, maxlags=None, norm='biased'):
            lag is 1.0.
 
     :return:
-        * a numpy.array containing the cross-correlation sequence (length 2*N-1)
+        * a np.array containing the cross-correlation sequence (length 2*N-1)
         * lags vector
 
     .. note:: If x and y are not the same length, the shorter vector is

@@ -17,6 +17,7 @@ from scipy.io import wavfile
 from scipy.signal import deconvolve, lfilter, lfiltic
 
 from spectrum import *
+import decoder_old.decoder
 
 
 def lpanafil(s : np.ndarray, a : np.ndarray, hlp : np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -218,7 +219,7 @@ class StpLtpEncoder:
             # long term correlations
             aux_matrix1 = np.expand_dims(np.arange(self.cfg.subframe),0) + np.expand_dims(np.arange(self.cfg.pitch_lag_max-self.cfg.pitch_lag_min+1),0).T
 
-            print(aux_matrix1)
+            #  print(aux_matrix1)
 
             aux_matrix2 = past_short_term_residual[aux_matrix1] 
 
@@ -235,6 +236,8 @@ class StpLtpEncoder:
 
             aux1 = np.argmax(aux_matrix3)
 
+            print(aux_matrix3[aux1])
+
             # fill the pitch for the subframe
             ltp_lags[i] = self.cfg.pitch_lag_max - aux1
             
@@ -242,7 +245,7 @@ class StpLtpEncoder:
             ltp_taps[i] = -merit[aux1]
             
             # fill the variance of the long term residual for the subframe
-            ltp_variances[i] = np.sum(current_subframe**2) - aux_matrix3[aux1]
+            ltp_variances[i] = (np.sum(current_subframe**2) - aux_matrix3[aux1])/self.cfg.subframe
 
             current_frame_long_term_res[i*self.cfg.subframe:(i+1)*self.cfg.subframe] = (current_subframe + ltp_taps[i]*aux_matrix2[aux1,:].ravel())/np.sqrt(ltp_variances[i])
 
@@ -297,6 +300,20 @@ class StpLtpDecoder:
 
             self.short_term_res = np.random.randn(self.cfg.pitch_lag_max,)*1e-6
 
+        def set_lsf(self, lsf : np.ndarray):
+
+            self.lsf = lsf
+
+            self.a = lsf2poly(self.lsf)
+
+        def set_hlp(self, hlp: np.ndarray, a: np.ndarray):
+
+            self.hlp = lfiltic([1.0], a, hlp[::-1])
+
+        def set_short_term_residual_initial_conditions(self, short_term_res : np.ndarray):
+
+            self.short_term_res = short_term_res
+
     def __init__(self, sampling_rate : int):
 
         self.cfg = Config(sampling_rate) 
@@ -346,7 +363,7 @@ class StpLtpDecoder:
         #
         #  print(short_term_residual[beg2:end2].size, short_term_residual[beg1:end1].size)
         #  input('size')
-        short_term_residual[beg2:end2] += parameters.ltp_taps[i] * short_term_residual[beg1:end1]
+        short_term_residual[beg2:end2] -= parameters.ltp_taps[i] * short_term_residual[beg1:end1]
 
 
 
@@ -395,6 +412,8 @@ class StpLtpDecoder:
             [output_signal_frame[i*self.cfg.subframe:(i+1)*self.cfg.subframe], self.state.hlp] = \
                 lfilter([1.0],parameters.a[i,:].ravel(),\
                         short_term_residual[i*self.cfg.subframe:(i+1)*self.cfg.subframe],zi = self.state.hlp)
+
+        return output_signal_frame
 
     def frame(self, parameters) -> np.ndarray:
         """STP/LTP synthesis procedure for one frame
@@ -513,19 +532,19 @@ if __name__ == "__main__":
 
     sample_rate = 16000
 
-    #  for file_ in files:
-    #
-    #      speech_signal, sample_rate = read_wav_and_normalize(file_)
-    #
-    #      encode = StpLtpEncoder(sample_rate)
-    #
-    #      decode = StpLtpDecoder(sample_rate)
-    #
-    #      output_signal = np.zeros_like(speech_signal)
-    #
-    #      start = 0
-    #
-    #      for signal_frame in frames_generator(speech_signal, encode.cfg.frame):
+    #  for file_ in files[:1]:
+#
+        #  speech_signal, sample_rate = read_wav_and_normalize(file_)
+#
+        #  encode = StpLtpEncoder(sample_rate)
+#
+        #  decode = StpLtpDecoder(sample_rate)
+#
+        #  output_signal = np.zeros_like(speech_signal)
+#
+        #  start = 0
+#
+        #  for signal_frame in frames_generator(speech_signal, encode.cfg.frame):
     
     # load data
 
@@ -535,55 +554,115 @@ if __name__ == "__main__":
 
     str_previous = np.loadtxt('str_previous.txt')
 
+    lsf_previous = np.loadtxt('lsf_previous.txt')
+
     sig = np.concatenate((sig_prev, sig_current))
 
     signal_frame = sig_current
 
+    # setup encoder
+
+    encode = StpLtpEncoder(sample_rate)
+
+    encode.state.set_lsf(lsf_previous)
+#
+    encode.state.set_hlp(sig_prev[-encode.cfg.p:])
+
+    encode.state.set_short_term_residual_initial_conditions(str_previous[-encode.cfg.pitch_lag_max:])
+
+    # setup decoder
+
+    decode = StpLtpDecoder(sample_rate)
+
+    decode.state.set_lsf(lsf_previous)
+
+    decode.state.set_short_term_residual_initial_conditions(str_previous[-encode.cfg.pitch_lag_max:])
+
+    # setup old encoder
+
+    CodStat = decoder_old.decoder.InitEncStatFromData(16, 320, lsf_previous, lsf_previous, sig_prev[-encode.cfg.p:], str_previous)
+
     fig, axs = plt.subplots(1,2,figsize = (18,6))
-    
+
     axs[0].plot(sig)
 
     axs[1].plot(str_previous)
 
     plt.show()
 
-    encode = StpLtpEncoder(sample_rate)
 
-    encode.state.set_hlp(sig_prev[-encode.cfg.p:])
-
-    encode.state.set_short_term_residual_initial_conditions(str_previous[-encode.cfg.pitch_lag_max:])
-
-    decode = StpLtpDecoder(sample_rate)
+    # encode
 
     parameters, short_term_residual_encoded = encode.frame(signal_frame)
 
     print(parameters.ltp_lags)
+    print(parameters.ltp_taps)
+    print(f"LtpVar new {parameters.ltp_variances}")
+    print(parameters.lsf[:,3])
+    print(f"STP {parameters.a}")
 
-    output_signal[start:start+encode.cfg.frame], short_term_residual_decoded = decode.frame(parameters)
+    # encode with the old encoder
 
-            #  if start == 7040 - encode.cfg.frame:
-            #
-            #      np.savetxt('str_previous.txt', short_term_residual_encoded)
-            #
-            #      np.savetxt('sig_previous.txt', signal_frame)
-            #
-            #  if start == 7040:
-            #
-            #      np.savetxt('sig_current.txt', signal_frame)
-            #
-            #  print(f"Start of the frame {start}, end {start+encode.cfg.frame}")
+    CodStat, Par, LongTermResidual = decoder_old.decoder.Encoder(signal_frame, CodStat, 16, 320, 4, 4, 16000)
 
-            #  fig, ax = plt.subplots(figsize = (6,6))
+    print(Par.LtpLag)
+    print(Par.LtpTap)
+    print(f"LtpVar {Par.LtpVar}")
+
+    fig, axs = plt.subplots(figsize=(6,6))
+    axs.plot(parameters.current_frame_long_term_res, label="new encoder")
+    #  axs.plot(short_term_residual_encoded, label="new encoder")
+    axs.plot(LongTermResidual, label="old encoder")
+    #  axs.plot(CodStat.ShortTermRes, label="old encoder")
+    plt.legend()
+    plt.show()
+
+    #  print(parameters.ltp_lags)
+
+    #  output_signal[start:start+encode.cfg.frame], short_term_residual_decoded = decode.frame(parameters)
+    print(f"shape a : {parameters.a.shape}")
+    input('PE')
+
+    decode.state.set_hlp(sig_prev[-encode.cfg.p:], parameters.a[0,:])
+    output_frame, short_term_residual_decoded = decode.frame(parameters)
+
+    fig, axs = plt.subplots(figsize=(6,6))
+    axs.plot(short_term_residual_decoded,label='decoded')
+    axs.plot(short_term_residual_encoded,label='encoded')
+    plt.legend()
+    plt.show()
+    print(output_frame)
+    fig, axs = plt.subplots(figsize=(6,6))
+    axs.plot(output_frame, label='decoded')
+    axs.plot(signal_frame, label='input')
+    plt.legend()
+    plt.show()
+
+#              if start == 7040 - encode.cfg.frame:
 #
-            #  ax.plot(short_term_residual_encoded, label='signal')
+#                  np.savetxt('str_previous.txt', short_term_residual_encoded)
 #
-            #  ax.plot(signal_frame, label='reconstructed signal')
-
-            #  ax.legend()
+#                  np.savetxt('sig_previous.txt', signal_frame)
 #
-            #  plt.show()
-
-            #  start += encode.cfg.frame
+#                  np.savetxt('lsf_previous.txt', parameters.lsf[:,3])
+#
+#              if start == 7040:
+#
+#                  np.savetxt('sig_current.txt', signal_frame)
+#
+#              print(f"Start of the frame {start}, end {start+encode.cfg.frame}")
+#
+#              fig, ax = plt.subplots(figsize = (6,6))
+#
+#              ax.plot(short_term_residual_encoded, label='signal')
+#
+#              ax.plot(signal_frame, label='reconstructed signal')
+#  #
+#              ax.legend()
+#
+#              plt.show()
+#
+#              start += encode.cfg.frame
 
     #  print(file_.replace('input','output'))
     #
