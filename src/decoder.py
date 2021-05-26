@@ -298,7 +298,21 @@ class StpLtpDecoder:
         return short_term_residual
 
 
-    def _synthesize_chunk(self, short_term_residual, parameters, i, up_to_sample):
+    def _synthesize_chunk(self, short_term_residual : np.ndarray, parameters, i : int, up_to_sample : int ) -> Tuple[bool,int]:
+        """ Internal method, difficult to understand what is really does, but try hard :)
+
+        :param short_term_residual: short term residual signal
+        :type short_term_residual: np.ndarray
+        :param parameters: parameters structure with fields documented in the frame method docstring
+        :param i: subframe number
+        :type i: int
+        :param up_to_sample: points to the last sample of the short_term_residual thus far synthesised
+        :type up_to_sample: int
+        :return: two values
+            * first value, if true, indicates that the whole short term residual has been synthesised for the current subframe
+            * second value, the up_to_sample for the next call of _synthesise_chunk for the current subframe (of number i)
+        :rtype: Tuple[bool,int]
+        """
 
         remainder = self.cfg.pitch_lag_max + self.cfg.subframe - up_to_sample
 
@@ -328,6 +342,16 @@ class StpLtpDecoder:
             return False, end2 
             
     def _ltp_single_subframe_synthesis(self, parameters, long_term_residual_subframe: np.ndarray, i : int):
+        """ Synthesises entire subframe of the short term residual signal
+
+        :param parameters:
+        :param long_term_residual_subframe: the current subframe long term residual
+        :type long_term_residual_subframe: np.ndarray
+        :param i: subframe number
+        :type i: int
+        :return: the synthesised subframe of the short term residual
+        :rtype: np.ndarray
+        """
 
         short_term_residual_subframe = np.sqrt(parameters.ltp_variances[i]) * long_term_residual_subframe 
 
@@ -342,7 +366,16 @@ class StpLtpDecoder:
 
         return self.short_term_residual_subframe
 
-    def _signal_synthesis(self, parameters, short_term_residual):
+        """ """
+    def _signal_synthesis(self, parameters, short_term_residual: np.ndarray) -> np.ndarray:
+        """Synthesizes output speech signal frame based on the parameters structure and the short_term_residual.
+
+        :param parameters: structure with fields documented in frame method docstring
+        :param short_term_residual: the short term residual signal frame
+        :type short_term_residual: np.ndarray
+        :return: output speech frame after STP synthesis
+        :rtype: np.ndarray
+        """
 
         output_signal_frame = np.zeros((self.cfg.frame,))
 
