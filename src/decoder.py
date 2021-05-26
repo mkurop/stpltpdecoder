@@ -17,31 +17,7 @@ from scipy.io import wavfile
 from scipy.signal import deconvolve, lfilter, lfiltic
 
 from spectrum import *
-import decoder_old.decoder
-
-
-def lpanafil(s : np.ndarray, a : np.ndarray, hlp : np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Computes the short term residual given Short Term Predictor (STP) parameters and an initial state.
-
-    :param s: signal frame
-    :type s: np.ndarray
-    :param a: STP parameters [1, a1 , ..., a_p]
-    :type a: np.ndarray
-    :param hlp: history of the analysis filter
-    :type hlp: np.ndarray
-    :return: 
-        * res - STP residual
-        * hlp - history for the next signal frame
-    :rtype: Tuple[np.ndarray, np.ndarray]
-    """
-
-    s = np.concatenate([hlp,s])
-    p = len(a)-1
-    res = np.convolve(s,a,mode='full')
-    res = res[p:-p]
-    hlp = s[-p:]
-    return res, hlp
-
+from utils import *
 
 class Config:
     """Class holding the parameters of the STP/LTP encoder/decoder. Configurable using single \
@@ -223,9 +199,6 @@ class StpLtpEncoder:
 
             aux_matrix2 = past_short_term_residual[aux_matrix1] 
 
-            #  print(aux_matrix2)
-            #  input('PE')
-
             long_term_correlations = np.sum(aux_matrix2 * current_subframe,axis=1)
 
             denominators = np.sum(aux_matrix2 * aux_matrix2,axis=1)
@@ -235,8 +208,6 @@ class StpLtpEncoder:
             aux_matrix3 = merit * long_term_correlations
 
             aux1 = np.argmax(aux_matrix3)
-
-            print(aux_matrix3[aux1])
 
             # fill the pitch for the subframe
             ltp_lags[i] = self.cfg.pitch_lag_max - aux1
@@ -248,14 +219,6 @@ class StpLtpEncoder:
             ltp_variances[i] = (np.sum(current_subframe**2) - aux_matrix3[aux1])/self.cfg.subframe
 
             current_frame_long_term_res[i*self.cfg.subframe:(i+1)*self.cfg.subframe] = (current_subframe + ltp_taps[i]*aux_matrix2[aux1,:].ravel())/np.sqrt(ltp_variances[i])
-
-        #  fig, ax = plt.subplots(figsize=(6,6))
-        #  ax.plot(signal_frame, label="signal")
-        #  ax.plot(current_frame_short_term_res, label="STP residual")
-        #  ax.plot(current_frame_long_term_res, label="LTP residual")
-        #  plt.ylim([signal_frame.min(),signal_frame.max()])
-        #  ax.legend()
-        #  plt.show()
 
         # update state for next frame
         self.state.lsf = lsf
@@ -271,8 +234,7 @@ class StpLtpEncoder:
         output_parameters.ltp_variances = ltp_variances
         output_parameters.current_frame_long_term_res = current_frame_long_term_res
 
-        return output_parameters, short_term_residual[self.cfg.pitch_lag_max:]
-
+        return output_parameters
 
 class StpLtpDecoder:
 
@@ -350,28 +312,9 @@ class StpLtpDecoder:
 
         end2 = np.amin((beg2 + len1, self.cfg.pitch_lag_max + self.cfg.subframe))
 
-        #  print(beg1, end1)
-        #  print(len1)
-        #  print(beg2, end2)
-        #  print(end2-beg2)
-        #  print(beg2 - beg1)
-        #  print(parameters.ltp_lags[i])
-        #  print(f'short term state + subframe length {self.cfg.pitch_lag_max+self.cfg.subframe}')
-        #  print(f'new up_to_sample {end2}')
-        #  print(f'up_to_sample = {up_to_sample}')
-        #  input('PE chunk')
-        #
-        #  print(short_term_residual[beg2:end2].size, short_term_residual[beg1:end1].size)
-        #  input('size')
         short_term_residual[beg2:end2] -= parameters.ltp_taps[i] * short_term_residual[beg1:end1]
 
-
-
-        #  print(end2)
-        #  print(self.cfg.pitch_lag_max+self.cfg.subframe)
-
         if end2 == self.cfg.pitch_lag_max + self.cfg.subframe:
-
 
             # update state
             self.state.short_term_res = short_term_residual[self.cfg.subframe:]
@@ -379,6 +322,7 @@ class StpLtpDecoder:
             self.short_term_residual_subframe = short_term_residual[self.cfg.pitch_lag_max:]
 
             return True, end2
+
         else:
 
             return False, end2 
@@ -395,9 +339,6 @@ class StpLtpDecoder:
         while not flag:
 
             flag, up_to_sample =self._synthesize_chunk(short_term_residual, parameters, i, up_to_sample) 
-
-            #  print(up_to_sample)
-            #  input('PE')
 
         return self.short_term_residual_subframe
 
@@ -439,88 +380,7 @@ class StpLtpDecoder:
         
         output_signal_frame = self._signal_synthesis(parameters, short_term_residual)
 
-        #  fig, ax = plt.subplots(figsize=(6,6))
-        #  ax.plot(output_signal_frame, label='signal frame') #'STP synthesised residual'
-        #  plt.ylim([-0.3,0.3])
-        #  plt.show()
-        return output_signal_frame, short_term_residual
-
-def wav_files_in_directory(dir : str) -> List[str]:
-    """ Finds all files with the .wav extention in subdirectories of the dir folder.
-
-    :param dir: the folder to be searched over
-    :type dir: str
-
-    :return: the list of files with .wav extension found
-    :rtype: List[str]
-
-    :raises ValueError: error raised if the provided directory does not exist
-    """
-    
-    if not os.path.exists(dir):
-        raise ValueError(f"The directory {dir} does not exists.")
-
-    files_list = []
-
-    for roots,dirs,files in os.walk(dir):
-
-        for file_ in files:
-
-            if file_.endswith("WAV") or file_.endswith("wav"):
-
-                files_list.append(os.path.join(roots,file_))
-
-    return files_list
-
-def read_wav_and_normalize(file_ : str) -> Tuple[np.ndarray,int]:
-
-    if not os.path.exists(file_):
-        raise ValueError(f"The file {file_} does not exist.")
-
-    sr, s = wavfile.read(file_)
-
-    s = s/2.**15
-    
-
-    np.random.seed(1000) # causes the dither is same on each run
-
-    s += np.random.randn(*s.shape)*1.e-6 # add dither to improve numerical behaviour
-
-    return s, int(sr)
-
-def write_wav(signal : np.ndarray, sampling_rate : int, file_name : str):
-
-    try:
-        os.makedirs(os.path.dirname(file_name))
-    except OSError:
-        print(f'Can not create the directory {os.path.dirname(file_name)}')
-    else:
-        print(f'Path {os.path.dirname(file_name)} succesfully created.')
-
-    wavfile.write(file_name, sampling_rate, np.int16(signal*2**15))
-
-def clear_output_directory():
-
-    if os.path.exists('../data/output/'): 
-        if len(os.listdir('../data/output/')) > 0:
-            shutil.rmtree('../data/output') 
-    else: 
-        try:
-            os.makedirs('../data/output/')
-        except OSError:
-            print("Creation of ../data/output/ failed")
-        else:
-            print("Successfully created the directory ../data/output/")
-
-def frames_generator(s : np.ndarray, frame_length):
-
-    start = 0
-
-    while start + frame_length < s.size:
-
-        yield s[start:start+frame_length]
-
-        start += frame_length
+        return output_signal_frame
 
 
 
@@ -532,164 +392,31 @@ if __name__ == "__main__":
 
     sample_rate = 16000
 
-    #  for file_ in files[:1]:
-#
-        #  speech_signal, sample_rate = read_wav_and_normalize(file_)
-#
-        #  encode = StpLtpEncoder(sample_rate)
-#
-        #  decode = StpLtpDecoder(sample_rate)
-#
-        #  output_signal = np.zeros_like(speech_signal)
-#
-        #  start = 0
-#
-        #  for signal_frame in frames_generator(speech_signal, encode.cfg.frame):
-    
-    # load data
+    for file_ in files:
 
-    sig_prev = np.loadtxt('sig_previous.txt')
+        speech_signal, sample_rate = read_wav_and_normalize(file_)
 
-    sig_current = np.loadtxt('sig_current.txt')
+        encode = StpLtpEncoder(sample_rate)
 
-    str_previous = np.loadtxt('str_previous.txt')
+        decode = StpLtpDecoder(sample_rate)
 
-    lsf_previous = np.loadtxt('lsf_previous.txt')
+        output_signal = np.zeros_like(speech_signal)
 
-    sig = np.concatenate((sig_prev, sig_current))
+        start = 0
 
-    signal_frame = sig_current
+        for signal_frame in frames_generator(speech_signal, encode.cfg.frame):
 
-    # setup encoder
+            # encode
 
-    encode = StpLtpEncoder(sample_rate)
+            parameters = encode.frame(signal_frame)
 
-    encode.state.set_lsf(lsf_previous)
-#
-    encode.state.set_hlp(sig_prev[-encode.cfg.p:])
+            # decode
 
-    encode.state.set_short_term_residual_initial_conditions(str_previous[-encode.cfg.pitch_lag_max:])
+            output_frame = decode.frame(parameters)
 
-    # setup decoder
+            output_signal[start:start+encode.cfg.frame] = output_frame
 
-    decode = StpLtpDecoder(sample_rate)
+            start += encode.cfg.frame
 
-    decode.state.set_lsf(lsf_previous)
-
-    decode.state.set_short_term_residual_initial_conditions(str_previous[-encode.cfg.pitch_lag_max:])
-
-    # setup old encoder
-
-    CodStat = decoder_old.decoder.InitEncStatFromData(16, 320, lsf_previous, lsf_previous, sig_prev[-encode.cfg.p:], str_previous)
-
-    fig, axs = plt.subplots(1,2,figsize = (18,6))
-
-    axs[0].plot(sig)
-
-    axs[1].plot(str_previous)
-
-    plt.show()
-
-
-    # encode
-
-    parameters, short_term_residual_encoded = encode.frame(signal_frame)
-
-    print(parameters.ltp_lags)
-    print(parameters.ltp_taps)
-    print(f"LtpVar new {parameters.ltp_variances}")
-    print(parameters.lsf[:,3])
-    print(f"STP {parameters.a}")
-
-    # encode with the old encoder
-
-    CodStat, Par, LongTermResidual = decoder_old.decoder.Encoder(signal_frame, CodStat, 16, 320, 4, 4, 16000)
-
-    print(Par.LtpLag)
-    print(Par.LtpTap)
-    print(f"LtpVar {Par.LtpVar}")
-
-    fig, axs = plt.subplots(figsize=(6,6))
-    axs.plot(parameters.current_frame_long_term_res, label="new encoder")
-    #  axs.plot(short_term_residual_encoded, label="new encoder")
-    axs.plot(LongTermResidual, label="old encoder")
-    #  axs.plot(CodStat.ShortTermRes, label="old encoder")
-    plt.legend()
-    plt.show()
-
-    #  print(parameters.ltp_lags)
-
-    #  output_signal[start:start+encode.cfg.frame], short_term_residual_decoded = decode.frame(parameters)
-    print(f"shape a : {parameters.a.shape}")
-    input('PE')
-
-    decode.state.set_hlp(sig_prev[-encode.cfg.p:], parameters.a[0,:])
-    output_frame, short_term_residual_decoded = decode.frame(parameters)
-
-    fig, axs = plt.subplots(figsize=(6,6))
-    axs.plot(short_term_residual_decoded,label='decoded')
-    axs.plot(short_term_residual_encoded,label='encoded')
-    plt.legend()
-    plt.show()
-    print(output_frame)
-    fig, axs = plt.subplots(figsize=(6,6))
-    axs.plot(output_frame, label='decoded')
-    axs.plot(signal_frame, label='input')
-    plt.legend()
-    plt.show()
-
-#              if start == 7040 - encode.cfg.frame:
-#
-#                  np.savetxt('str_previous.txt', short_term_residual_encoded)
-#
-#                  np.savetxt('sig_previous.txt', signal_frame)
-#
-#                  np.savetxt('lsf_previous.txt', parameters.lsf[:,3])
-#
-#              if start == 7040:
-#
-#                  np.savetxt('sig_current.txt', signal_frame)
-#
-#              print(f"Start of the frame {start}, end {start+encode.cfg.frame}")
-#
-#              fig, ax = plt.subplots(figsize = (6,6))
-#
-#              ax.plot(short_term_residual_encoded, label='signal')
-#
-#              ax.plot(signal_frame, label='reconstructed signal')
-#  #
-#              ax.legend()
-#
-#              plt.show()
-#
-#              start += encode.cfg.frame
-
-    #  print(file_.replace('input','output'))
-    #
-    #  fig, ax = plt.subplots(figsize = (6,6))
-    #  #ax.plot(s)
-    #  ax.plot(output_signal)
-    #  plt.show()
-    #  write_wav(output_signal, encode.cfg.sampling_rate, file_.replace('input','output'))
+        write_wav(output_signal, encode.cfg.sampling_rate, file_.replace('input','output'))
             
-
-
-
-
-        
-    #  sr, s = wavfile.read("VLRecording10591_05.04.13_25.168.wav")
-    #  s = s/2.**15
-    #  s_out = np.zeros_like(s)
-    #  CodStat = InitEncStat(16, 512)
-    #  DecStat = InitDecStat(16, 512)
-    #  start = 0
-    #  Frame = 512
-    #  p = 16
-    #  while start + Frame < len(s):
-    #      fs = s[start:start+Frame]
-    #      CodStat, Par, LongTermRes = Encoder(fs, CodStat, p, Frame, 4, 4, 16000)
-    #      fs_out, DecStat = Decoder(LongTermRes,Par,DecStat,p,4,4)
-    #      s_out[start:start+Frame] = fs_out
-    #      start = start + Frame
-    #
-    #  wavfile.write("s_out.wav", 16000, np.int16(s_out*2.**15))
