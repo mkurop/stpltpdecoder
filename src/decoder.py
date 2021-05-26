@@ -8,8 +8,10 @@ Provided classes for encoder and decoder work for any specified sampling frequen
 Created 31.03.2014 Code modernized 22.05.2021"""
 
 import os
+import shutil
 from typing import Tuple, List
 
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import deconvolve, lfilter, lfiltic
@@ -57,6 +59,9 @@ class Config:
 
             raise ValueError("Sampling rate have to be either 8000Hz or 16000Hz.")
 
+        # memorize the sampling_rate
+        self.sampling_rate = sampling_rate
+
         # order of the STP filter
 
         self.p = 10 if sampling_rate == 8000 else 16 
@@ -71,16 +76,19 @@ class Config:
 
         # length of the signal subframe in samples
 
-        self.subframe = self.frame / self.subframes
+        self.subframe = int(self.frame / self.subframes)
 
         # minimal and maximal pitch lag
-        self.pitch_lag_max = 120 * sampling_rate/8000
-        self.pitch_lag_min = 20 * sampling_rate/8000
+        self.pitch_lag_max = int(120 * sampling_rate/8000)
+        self.pitch_lag_min = int(20 * sampling_rate/8000)
 
         # parameters for the poles bandwidth widening procedure
         self.g1 = 0.994
-        self.gk1 = np.cumprod(np.ones((self.p,)) * g1)
+        self.gk1 = np.cumprod(np.ones((self.p,)) * self.g1)
 
+class OutputParameters:
+    """Empty class for holding the output parameters from the encoder."""
+    pass
 
 class StpLtpEncoder:
     """Class performing the STP/LTP analysis of the input frame given the state of the encoder
@@ -109,8 +117,19 @@ class StpLtpEncoder:
 
             self.hlp = np.zeros((self.cfg.p,)) # initial conditions for the STP analysis 
 
-            short_term_res = np.random.randn((self.cfg.pitch_lag_max,))*1e-6 # initial conditions for the LTP analysis
+            self.short_term_res = np.random.randn(self.cfg.pitch_lag_max,)*1e-6 # initial conditions for the LTP analysis
 
+        def set_lsf(self, lsf : np.ndarray):
+
+            self.lsf = lsf
+
+        def set_hlp(self, hlp: np.ndarray):
+
+            self.hlp = hlp
+
+        def set_short_term_residual_initial_conditions(self, short_term_res : np.ndarray):
+
+            self.short_term_res = short_term_res
 
     def __init__(self, sampling_rate: int = 16000):
         """Constructor method"""
@@ -121,7 +140,7 @@ class StpLtpEncoder:
 
         # instantiate encoder state object
 
-        self.state = EncoderState(sampling_rate)
+        self.state = StpLtpEncoder.EncoderState(sampling_rate)
 
     def frame(self, signal_frame : np.ndarray):
         """ Analyzes the input signal frame and returns a structure of output parameters, updates the state object.
@@ -147,7 +166,9 @@ class StpLtpEncoder:
         x, lags = xcorr(signal_frame, maxlags = self.cfg.p)
 
         # compute the STP polynomial
-        a, stp_excitation_variance, reflection_coefficients = levinson(x[p:]) 
+        a, stp_excitation_variance, reflection_coefficients = levinson(x[self.cfg.p:]) 
+
+        a = np.concatenate(([1.],a))
 
         # bandwidth extension
         a[1:] *= self.cfg.gk1
@@ -174,8 +195,9 @@ class StpLtpEncoder:
 
         # LTP analysis -------------------------
 
-        short_term_residual = np.concatenate(self.state.short_term_res,current_frame_short_term_res)
+        short_term_residual = np.concatenate((self.state.short_term_res,current_frame_short_term_res))
 
+        # space for the long term residual
         current_frame_long_term_res = np.zeros_like(current_frame_short_term_res)
 
         # space for pitches in subframes (LTP lags)
@@ -191,12 +213,17 @@ class StpLtpEncoder:
 
             current_subframe = current_frame_short_term_res[i*self.cfg.subframe:(i+1)*self.cfg.subframe]
 
-            past_short_term_residual = short_term_residual[i*self.cfg.subframe: (i+i)*self.cfg.subframe + self.cfg.pitch_lag_max - self.cfg.pitch_lag_min]
+            past_short_term_residual = short_term_residual[i*self.cfg.subframe: (i+1)*self.cfg.subframe + self.cfg.pitch_lag_max - self.cfg.pitch_lag_min]
 
             # long term correlations
-            aux_matrix1 = np.expand_dim(np.arange(self.cfg.subframe,0)) + np.expand_dim(np.arange(self.cfg.pitch_lag_max-self.cfg.pitch_lag_min),0).T
+            aux_matrix1 = np.expand_dims(np.arange(self.cfg.subframe),0) + np.expand_dims(np.arange(self.cfg.pitch_lag_max-self.cfg.pitch_lag_min+1),0).T
+
+            print(aux_matrix1)
 
             aux_matrix2 = past_short_term_residual[aux_matrix1] 
+
+            #  print(aux_matrix2)
+            #  input('PE')
 
             long_term_correlations = np.sum(aux_matrix2 * current_subframe,axis=1)
 
@@ -208,30 +235,43 @@ class StpLtpEncoder:
 
             aux1 = np.argmax(aux_matrix3)
 
+            # fill the pitch for the subframe
             ltp_lags[i] = self.cfg.pitch_lag_max - aux1
             
+            # fill the LTP filter tap for the subframe
             ltp_taps[i] = -merit[aux1]
-
+            
+            # fill the variance of the long term residual for the subframe
             ltp_variances[i] = np.sum(current_subframe**2) - aux_matrix3[aux1]
 
-            current_frame_long_term_res[i*self.cfg.subframe:(i+1)*self.cfg.subframe] = (current_subframe + ltp_taps[i]*aux_matrix[aux1,:].ravel())/np.sqrt(ltp_variances[i])
+            current_frame_long_term_res[i*self.cfg.subframe:(i+1)*self.cfg.subframe] = (current_subframe + ltp_taps[i]*aux_matrix2[aux1,:].ravel())/np.sqrt(ltp_variances[i])
+
+        #  fig, ax = plt.subplots(figsize=(6,6))
+        #  ax.plot(signal_frame, label="signal")
+        #  ax.plot(current_frame_short_term_res, label="STP residual")
+        #  ax.plot(current_frame_long_term_res, label="LTP residual")
+        #  plt.ylim([signal_frame.min(),signal_frame.max()])
+        #  ax.legend()
+        #  plt.show()
 
         # update state for next frame
         self.state.lsf = lsf
         self.state.short_term_res = current_frame_short_term_res[-self.cfg.pitch_lag_max:]
         
         # fill output parameters structure
+        output_parameters = OutputParameters()
         output_parameters.lsf = lsf_interpolated
         output_parameters.a = a_interpolated
-        output_parameters.ltp_lags = ltp_lags
+        
+        output_parameters.ltp_lags = np.uint32(ltp_lags) 
         output_parameters.ltp_taps = ltp_taps
         output_parameters.ltp_variances = ltp_variances
         output_parameters.current_frame_long_term_res = current_frame_long_term_res
 
-        return output_parameters
+        return output_parameters, short_term_residual[self.cfg.pitch_lag_max:]
 
 
-class StpLetDecoder:
+class StpLtpDecoder:
 
     class DecoderState:
         """Class holding the state of decoder, which changes from frame to frame
@@ -255,15 +295,108 @@ class StpLetDecoder:
 
             self.hlp = lfiltic([1.0], a, np.zeros((self.cfg.p,))) 
 
-            short_term_res = np.random.randn((self.cfg.pitch_lag_max,)))*1e-6
+            self.short_term_res = np.random.randn(self.cfg.pitch_lag_max,)*1e-6
 
     def __init__(self, sampling_rate : int):
 
-        self.cfg = Config(sampling_rate : int =16000)
+        self.cfg = Config(sampling_rate) 
 
-        self.state = DecoderState(sampling_rate)
+        self.state = StpLtpDecoder.DecoderState(sampling_rate)
 
-    def frame(parameters) -> np.ndarray:
+    def _short_term_residual_synthesis(self, parameters):
+
+        short_term_residual = np.zeros((self.cfg.frame,))
+
+        for i in range(self.cfg.subframes):
+
+            # LTP synthesis -------------------------------
+
+            long_term_residual_subframe = parameters.current_frame_long_term_res[i*self.cfg.subframe:(i+1)*self.cfg.subframe]
+
+            short_term_residual[i*self.cfg.subframe:(i+1)*self.cfg.subframe] = \
+                self._ltp_single_subframe_synthesis(parameters, long_term_residual_subframe, i)
+        
+        return short_term_residual
+
+
+    def _synthesize_chunk(self, short_term_residual, parameters, i, up_to_sample):
+
+        remainder = self.cfg.pitch_lag_max + self.cfg.subframe - up_to_sample
+
+        beg1 = up_to_sample - parameters.ltp_lags[i]
+
+        end1 = np.amin((up_to_sample, beg1 + remainder))
+
+        len1 = end1 - beg1
+
+        beg2 = up_to_sample 
+
+        end2 = np.amin((beg2 + len1, self.cfg.pitch_lag_max + self.cfg.subframe))
+
+        #  print(beg1, end1)
+        #  print(len1)
+        #  print(beg2, end2)
+        #  print(end2-beg2)
+        #  print(beg2 - beg1)
+        #  print(parameters.ltp_lags[i])
+        #  print(f'short term state + subframe length {self.cfg.pitch_lag_max+self.cfg.subframe}')
+        #  print(f'new up_to_sample {end2}')
+        #  print(f'up_to_sample = {up_to_sample}')
+        #  input('PE chunk')
+        #
+        #  print(short_term_residual[beg2:end2].size, short_term_residual[beg1:end1].size)
+        #  input('size')
+        short_term_residual[beg2:end2] += parameters.ltp_taps[i] * short_term_residual[beg1:end1]
+
+
+
+        #  print(end2)
+        #  print(self.cfg.pitch_lag_max+self.cfg.subframe)
+
+        if end2 == self.cfg.pitch_lag_max + self.cfg.subframe:
+
+
+            # update state
+            self.state.short_term_res = short_term_residual[self.cfg.subframe:]
+
+            self.short_term_residual_subframe = short_term_residual[self.cfg.pitch_lag_max:]
+
+            return True, end2
+        else:
+
+            return False, end2 
+            
+    def _ltp_single_subframe_synthesis(self, parameters, long_term_residual_subframe: np.ndarray, i : int):
+
+        short_term_residual_subframe = np.sqrt(parameters.ltp_variances[i]) * long_term_residual_subframe 
+
+        # extend current frame short_term_residual with the past samples of the STP residual
+        short_term_residual = np.concatenate((self.state.short_term_res,short_term_residual_subframe))
+
+        flag, up_to_sample = self._synthesize_chunk(short_term_residual, parameters, i, self.cfg.pitch_lag_max)
+
+        while not flag:
+
+            flag, up_to_sample =self._synthesize_chunk(short_term_residual, parameters, i, up_to_sample) 
+
+            #  print(up_to_sample)
+            #  input('PE')
+
+        return self.short_term_residual_subframe
+
+    def _signal_synthesis(self, parameters, short_term_residual):
+
+        output_signal_frame = np.zeros((self.cfg.frame,))
+
+        # recreate the output frame and update initial conditions for the STP synthesis filter
+
+        for i in range(self.cfg.subframes):
+
+            [output_signal_frame[i*self.cfg.subframe:(i+1)*self.cfg.subframe], self.state.hlp] = \
+                lfilter([1.0],parameters.a[i,:].ravel(),\
+                        short_term_residual[i*self.cfg.subframe:(i+1)*self.cfg.subframe],zi = self.state.hlp)
+
+    def frame(self, parameters) -> np.ndarray:
         """STP/LTP synthesis procedure for one frame
 
         :param parameters: an input parameters structure with the fields
@@ -279,74 +412,19 @@ class StpLetDecoder:
         :rtype: np.ndarray 
         """
 
-        output_signal_frame = np.zeros((self.cfg.frame,))
+        # LTP synthesis
 
-        for i in range(self.cfg.subframes):
+        short_term_residual = self._short_term_residual_synthesis(parameters)
 
-            # LTP synthesis -------------------------------
+        # STP synthesis ----------------------------------
+        
+        output_signal_frame = self._signal_synthesis(parameters, short_term_residual)
 
-            short_term_residual = np.sqrt(parameters.ltp_variances[i]) * parameters.current_frame_long_term_res[i*self.cfg.subframe:(i+1)*self.cfg.subframe]
-
-            beg1 = self.cfg.pitch_lag_max-parameters.ltp_lags[i]
-
-            end1 = np.min(self.cfg.pitch_lag_max, beg1 + self.cfg.subframe)
-
-            aux_vector1 = parameters.ltp_taps[i] * self.state.short_term_res[beg1:end1]
-
-            aux1 = end1 - beg1
-
-            short_term_residual[:aux1] += aux_vector1
-
-            beg2 = aux1 - parameters.ltp_lags[i]
-
-            end2 = self.cfg.subframe - parameters.ltp_lags[i]
-
-            if aux1 < self.cfg.subframe:
-
-                # extend current frame short_term_residual with the past samples of the STP residual
-                short_term_residual = np.concatenate(self.state.short_term_res,short_term_residual)
-                
-                aux2 = self.cfg.pitch_lag_max + aux1
-
-                len1 = self.cfg.subframe - aux1
-
-                beg2 = self.cfg.pitch_lag_max + aux1-parameters.ltp_lags[i]
-
-                end2 = beg2 + len1 
-
-                short_term_residual[aux2:] += parameters.ltp_taps[i]*short_term_residual[beg2:end2]
-
-            #  if beg2 < 0:
-            #
-            #      len1 = -beg2
-            #
-            #      aux2 = np.min(self.cfg.subframe,aux1+len1)
-            #
-            #      short_term_residual[aux1:aux2] = parameters.ltp_taps[i] * self.state.short_term_res[self.cfg.pitch_lag_max + beg2:]
-            #
-            #      len3 = self.cfg.subframe - aux2
-            #
-            #      beg3 = aux2 - parameters.ltp_lags[i]
-            #
-            #      end3 = beg3 + len3
-            #
-            #      short_term_residual[aux2:] = parameters.ltp_taps[i] * short_term_residual[beg3:end3]
-            #
-            #  else:
-            #
-            #      short_term_residual[aux1:] = parameters.ltp_taps[i] * short_term_residual[beg2:end2]
-
-            # update state
-
-            self.state.short_term_res = short_term_residual[self.cfg.subframe:] 
-            
-            # STP synthesis ----------------------------------
-
-            # recreate the output frame and update initial conditions for the STP synthesis filter
-
-            [output_signal_frame[i*self.cfg.subframe:(i+1)*self.cfg.subframe], self.state.hlp] = lfilter([1.0],parameters.a[:,i].ravel(),short_term_residual[self.cfg.pitch_lag_max:],zi = self.state.hlp)
-
-        return output_signal_frame
+        #  fig, ax = plt.subplots(figsize=(6,6))
+        #  ax.plot(output_signal_frame, label='signal frame') #'STP synthesised residual'
+        #  plt.ylim([-0.3,0.3])
+        #  plt.show()
+        return output_signal_frame, short_term_residual
 
 def wav_files_in_directory(dir : str) -> List[str]:
     """ Finds all files with the .wav extention in subdirectories of the dir folder.
@@ -369,27 +447,170 @@ def wav_files_in_directory(dir : str) -> List[str]:
 
         for file_ in files:
 
-            if file_.endswith("WAV") or file_.enswith("wav"):
+            if file_.endswith("WAV") or file_.endswith("wav"):
 
-                files_list.append(file_)
+                files_list.append(os.path.join(roots,file_))
 
     return files_list
 
+def read_wav_and_normalize(file_ : str) -> Tuple[np.ndarray,int]:
+
+    if not os.path.exists(file_):
+        raise ValueError(f"The file {file_} does not exist.")
+
+    sr, s = wavfile.read(file_)
+
+    s = s/2.**15
+    
+
+    np.random.seed(1000) # causes the dither is same on each run
+
+    s += np.random.randn(*s.shape)*1.e-6 # add dither to improve numerical behaviour
+
+    return s, int(sr)
+
+def write_wav(signal : np.ndarray, sampling_rate : int, file_name : str):
+
+    try:
+        os.makedirs(os.path.dirname(file_name))
+    except OSError:
+        print(f'Can not create the directory {os.path.dirname(file_name)}')
+    else:
+        print(f'Path {os.path.dirname(file_name)} succesfully created.')
+
+    wavfile.write(file_name, sampling_rate, np.int16(signal*2**15))
+
+def clear_output_directory():
+
+    if os.path.exists('../data/output/'): 
+        if len(os.listdir('../data/output/')) > 0:
+            shutil.rmtree('../data/output') 
+    else: 
+        try:
+            os.makedirs('../data/output/')
+        except OSError:
+            print("Creation of ../data/output/ failed")
+        else:
+            print("Successfully created the directory ../data/output/")
+
+def frames_generator(s : np.ndarray, frame_length):
+
+    start = 0
+
+    while start + frame_length < s.size:
+
+        yield s[start:start+frame_length]
+
+        start += frame_length
+
+
 
 if __name__ == "__main__":
-    sr, s = wavfile.read("VLRecording10591_05.04.13_25.168.wav")
-    s = s/2.**15
-    s_out = np.zeros_like(s)
-    CodStat = InitEncStat(16, 512)
-    DecStat = InitDecStat(16, 512)
-    start = 0
-    Frame = 512
-    p = 16
-    while start + Frame < len(s):
-        fs = s[start:start+Frame]
-        CodStat, Par, LongTermRes = Encoder(fs, CodStat, p, Frame, 4, 4, 16000)
-        fs_out, DecStat = Decoder(LongTermRes,Par,DecStat,p,4,4)
-        s_out[start:start+Frame] = fs_out
-        start = start + Frame
 
-    wavfile.write("s_out.wav", 16000, np.int16(s_out*2.**15))
+    files = wav_files_in_directory('../data/input/')
+
+    clear_output_directory()
+
+    sample_rate = 16000
+
+    #  for file_ in files:
+    #
+    #      speech_signal, sample_rate = read_wav_and_normalize(file_)
+    #
+    #      encode = StpLtpEncoder(sample_rate)
+    #
+    #      decode = StpLtpDecoder(sample_rate)
+    #
+    #      output_signal = np.zeros_like(speech_signal)
+    #
+    #      start = 0
+    #
+    #      for signal_frame in frames_generator(speech_signal, encode.cfg.frame):
+    
+    # load data
+
+    sig_prev = np.loadtxt('sig_previous.txt')
+
+    sig_current = np.loadtxt('sig_current.txt')
+
+    str_previous = np.loadtxt('str_previous.txt')
+
+    sig = np.concatenate((sig_prev, sig_current))
+
+    signal_frame = sig_current
+
+    fig, axs = plt.subplots(1,2,figsize = (18,6))
+    
+    axs[0].plot(sig)
+
+    axs[1].plot(str_previous)
+
+    plt.show()
+
+    encode = StpLtpEncoder(sample_rate)
+
+    encode.state.set_hlp(sig_prev[-encode.cfg.p:])
+
+    encode.state.set_short_term_residual_initial_conditions(str_previous[-encode.cfg.pitch_lag_max:])
+
+    decode = StpLtpDecoder(sample_rate)
+
+    parameters, short_term_residual_encoded = encode.frame(signal_frame)
+
+    print(parameters.ltp_lags)
+
+    output_signal[start:start+encode.cfg.frame], short_term_residual_decoded = decode.frame(parameters)
+
+            #  if start == 7040 - encode.cfg.frame:
+            #
+            #      np.savetxt('str_previous.txt', short_term_residual_encoded)
+            #
+            #      np.savetxt('sig_previous.txt', signal_frame)
+            #
+            #  if start == 7040:
+            #
+            #      np.savetxt('sig_current.txt', signal_frame)
+            #
+            #  print(f"Start of the frame {start}, end {start+encode.cfg.frame}")
+
+            #  fig, ax = plt.subplots(figsize = (6,6))
+#
+            #  ax.plot(short_term_residual_encoded, label='signal')
+#
+            #  ax.plot(signal_frame, label='reconstructed signal')
+
+            #  ax.legend()
+#
+            #  plt.show()
+
+            #  start += encode.cfg.frame
+
+    #  print(file_.replace('input','output'))
+    #
+    #  fig, ax = plt.subplots(figsize = (6,6))
+    #  #ax.plot(s)
+    #  ax.plot(output_signal)
+    #  plt.show()
+    #  write_wav(output_signal, encode.cfg.sampling_rate, file_.replace('input','output'))
+            
+
+
+
+
+        
+    #  sr, s = wavfile.read("VLRecording10591_05.04.13_25.168.wav")
+    #  s = s/2.**15
+    #  s_out = np.zeros_like(s)
+    #  CodStat = InitEncStat(16, 512)
+    #  DecStat = InitDecStat(16, 512)
+    #  start = 0
+    #  Frame = 512
+    #  p = 16
+    #  while start + Frame < len(s):
+    #      fs = s[start:start+Frame]
+    #      CodStat, Par, LongTermRes = Encoder(fs, CodStat, p, Frame, 4, 4, 16000)
+    #      fs_out, DecStat = Decoder(LongTermRes,Par,DecStat,p,4,4)
+    #      s_out[start:start+Frame] = fs_out
+    #      start = start + Frame
+    #
+    #  wavfile.write("s_out.wav", 16000, np.int16(s_out*2.**15))
