@@ -132,6 +132,7 @@ class StpLtpEncoder:
             * lsf - the line spectral frequency parameters in subframes, matrix with dimension p x subframes  \
             where subframes is the number of subframes per frame and p is the STP order
             * a - the STP polynomial coefficients in subframes, matrix with dimension (p+1) x subframes 
+            * stp_variance - the STP excitation variance
             * ltp_lags - the LTP predictor lags
             * ltp_taps - the LTP predictor taps
             * ltp_variances - variances of the excitation
@@ -223,6 +224,7 @@ class StpLtpEncoder:
         # fill output parameters structure
         output_parameters.lsf = lsf_interpolated
         output_parameters.a = a_interpolated
+        output_parameters.stp_variance = stp_excitation_variance
         output_parameters.ltp_lags = ltp_lags
         output_parameters.ltp_taps = ltp_taps
         output_parameters.ltp_variances = ltp_variances
