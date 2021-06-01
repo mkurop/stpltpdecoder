@@ -72,7 +72,7 @@ def read_wav_and_normalize(file_ : str) -> Tuple[np.ndarray,int]:
 
     np.random.seed(1000) # causes the dither is same on each run
 
-    s += np.random.randn(*s.shape)*1.e-6 # add dither to improve numerical behaviour
+    s += np.random.randn(*s.shape)*1.e-4 # add dither to improve numerical behaviour
 
     return s, int(sr)
 

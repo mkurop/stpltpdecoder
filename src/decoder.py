@@ -178,13 +178,13 @@ class StpLtpEncoder:
         current_frame_long_term_res = np.zeros_like(current_frame_short_term_res)
 
         # space for pitches in subframes (LTP lags)
-        ltp_lags = np.zeros((self.cfg.subframes,))
+        ltp_lags = np.zeros((self.cfg.subframes,), dtype = np.uint32)
 
         # space for LTP taps
-        ltp_taps = np.zeros_like(ltp_lags)
+        ltp_taps = np.zeros_like(ltp_lags, dtype = np.float64)
 
         # space for LTP variances
-        ltp_variances = np.zeros_like(ltp_lags)
+        ltp_variances = np.zeros_like(ltp_lags, dtype = np.float64)
         
         for i in range(self.cfg.subframes):
 
@@ -205,7 +205,7 @@ class StpLtpEncoder:
 
             aux_matrix3 = merit * long_term_correlations
 
-            aux1 = np.argmax(aux_matrix3)
+            aux1 = int(np.argmax(aux_matrix3))
 
             # fill the pitch for the subframe
             ltp_lags[i] = self.cfg.pitch_lag_max - aux1
@@ -214,7 +214,8 @@ class StpLtpEncoder:
             ltp_taps[i] = -merit[aux1]
             
             # fill the variance of the long term residual for the subframe
-            ltp_variances[i] = (np.sum(current_subframe**2) - aux_matrix3[aux1])/self.cfg.subframe
+            VARIANCE_FLOOR = 1.0e-4
+            ltp_variances[i] = np.amax([(np.sum(current_subframe**2) - aux_matrix3[aux1])/self.cfg.subframe, VARIANCE_FLOOR]) 
 
             current_frame_long_term_res[i*self.cfg.subframe:(i+1)*self.cfg.subframe] = (current_subframe + ltp_taps[i]*aux_matrix2[aux1,:].ravel())/np.sqrt(ltp_variances[i])
 
