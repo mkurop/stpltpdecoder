@@ -2,7 +2,10 @@
  
 __author__ = 'Marcin Kuropatwiński'
 
-"""Module for the computation of the Short Term Predictor and the Long Term Predictor parameters. \
+"""
+decoder.py
+================================================================================================
+Module for the computation of the Short Term Predictor and the Long Term Predictor parameters. \
 Provided classes for encoder and decoder work for any specified sampling frequency.
 
 Created 31.03.2014 Code modernized 22.05.2021"""
