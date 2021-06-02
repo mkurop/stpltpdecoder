@@ -395,6 +395,7 @@ class StpLtpDecoder:
             * lsf - the line spectral frequency parameters in subframes, matrix with dimension p x subframes  \
             where subframes is the number of subframes per frame and p is the STP order
             * a - the STP polynomial coefficients in subframes, matrix with dimension (p+1) x subframes 
+            * stp_variance - the variance of the short term residual signal
             * ltp_lags - the LTP predictor lags
             * ltp_taps - the LTP predictor taps
             * ltp_variances - variances of the excitation
