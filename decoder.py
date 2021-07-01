@@ -422,7 +422,7 @@ class StpLtpDecoder:
 
 if __name__ == "__main__":
 
-    files = wav_files_in_directory('../data/input/')
+    files = wav_files_in_directory('./data/input/')
 
     clear_output_directory()
 
