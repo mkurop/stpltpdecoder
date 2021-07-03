@@ -18,8 +18,8 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import deconvolve, lfilter, lfiltic
 
-from spectrum import *
-from utils import *
+from spectrum_decoder import *
+from utils_decoder import *
 
 class Config:
     """Class holding the parameters of the STP/LTP encoder/decoder. Configurable using single \
@@ -217,7 +217,7 @@ class StpLtpEncoder:
             ltp_taps[i] = -merit[aux1]
             
             # fill the variance of the long term residual for the subframe
-            VARIANCE_FLOOR = 1.0e-4
+            VARIANCE_FLOOR = 1.0e-12
             ltp_variances[i] = np.amax([(np.sum(current_subframe**2) - aux_matrix3[aux1])/self.cfg.subframe, VARIANCE_FLOOR]) 
 
             current_frame_long_term_res[i*self.cfg.subframe:(i+1)*self.cfg.subframe] = (current_subframe + ltp_taps[i]*aux_matrix2[aux1,:].ravel())/np.sqrt(ltp_variances[i])

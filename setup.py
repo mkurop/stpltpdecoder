@@ -16,5 +16,5 @@ setup(
     description = "Short term/Long term predictors based speech encoder and decoder",
     license = "MIT",
     long_description = read('README.md'),
-    py_modules = ['decoder', 'spectrum', 'utils'],
+    py_modules = ['decoder', 'spectrum_decoder', 'utils_decoder'],
     )
