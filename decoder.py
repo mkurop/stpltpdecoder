@@ -127,9 +127,9 @@ class StpLtpEncoder:
         :param signal_frame: samples in the signal frame
         :type signal_frame: np.ndarray
         :return: structure with fields
-            * lsf - the line spectral frequency parameters in subframes, matrix with dimension p x subframes  \
+            * lsf - the line spectral frequency parameters in subframes, matrix with dimension  p x subframes \
             where subframes is the number of subframes per frame and p is the STP order
-            * a - the STP polynomial coefficients in subframes, matrix with dimension (p+1) x subframes 
+            * a - the STP polynomial coefficients in subframes, matrix with dimension subframes x (p+1)
             * stp_variance - the STP excitation variance
             * ltp_lags - the LTP predictor lags
             * ltp_taps - the LTP predictor taps
