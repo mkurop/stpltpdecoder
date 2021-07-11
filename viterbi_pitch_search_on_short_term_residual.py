@@ -357,12 +357,15 @@ class ViterbiLtpParametersTrajectories:
 
         self._r_i = self._short_term_residual[-self._L_max:]
 
-        print(ltp_taps)
-        print(ltp_lags)
-        print(ltp_variances)
-        print(costs)
+        # compute long term residual for the best track
 
-        return ltp_taps, ltp_lags, ltp_variances, costs
+        excitation = np.zeros((self._frame,),dtype=np.float32)
+
+        for i in range(self._subframes):
+
+            excitation[i*self._subframe_length:(i+1)*self._subframe_length] = self._full_short_term_residual[self._L_max+i*self._subframe_length:self._L_max+(i+1)*self._subframe_length] + ltp_taps[i] * self._full_short_term_residual[self._L_max-ltp_lags[i] + i*self._subframe_length:self._L_max-ltp_lags[i]+(i+1)*self._subframe_length]/np.sqrt(ltp_variances[i])
+
+        return ltp_taps, ltp_lags, ltp_variances, excitation, costs
 
 if __name__ == "__main__":
 
