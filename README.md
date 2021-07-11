@@ -13,7 +13,7 @@ Activate the environment using
 ```
 conda activate <env_name>
 ```
-Then, go to src folder in the root of the repo and run
+Then, go to the root of the repo and run
 
 ```
 python decoder.py

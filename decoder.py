@@ -110,7 +110,7 @@ class StpLtpEncoder:
 
             self.short_term_res = short_term_res
 
-    def __init__(self, sampling_rate: int = 16000):
+    def __init__(self, sampling_rate : int = 16000, only_stp_analysis : bool = False, return_short_term_residual : bool = False):
         """Constructor method"""
 
         # instantiate object of type Config
@@ -120,6 +120,10 @@ class StpLtpEncoder:
         # instantiate encoder state object
 
         self.state = StpLtpEncoder.EncoderState(sampling_rate)
+
+        self._only_stp_analysis = only_stp_analysis
+
+        self._return_short_term_residual = return_short_term_residual
 
     def frame(self, signal_frame : np.ndarray):
         """ Analyzes the input signal frame and returns a structure of output parameters, updates the state object.
@@ -135,6 +139,11 @@ class StpLtpEncoder:
             * ltp_taps - the LTP predictor taps
             * ltp_variances - variances of the excitation
             * current_frame_long_term_res - the LTP residual, the excitation signal
+            or when only_stp_analysis flag is set to True
+            * lsf
+            * a
+            * stp_variance
+            * current_frame_short_term_res - the STP residual, LPC synthesis filter excitation signal
         """
 
         if signal_frame.size != self.cfg.frame:
@@ -172,6 +181,16 @@ class StpLtpEncoder:
 
             current_frame_short_term_res[i*self.cfg.subframe:(i+1)*self.cfg.subframe], self.state.hlp = \
                 lpanafil(signal_frame[i*self.cfg.subframe:(i+1)*self.cfg.subframe], a_interpolated[i,:].ravel(), self.state.hlp)
+
+        if self._only_stp_analysis:
+
+            output_parameters = OutputParameters()
+            output_parameters.lsf = lsf_interpolated
+            output_parameters.a = a_interpolated
+            output_parameters.stp_variance = stp_excitation_variance
+            output_parameters.current_frame_short_term_res = current_frame_short_term_res
+
+            return output_parameters
 
         # LTP analysis -------------------------
 
@@ -234,6 +253,8 @@ class StpLtpEncoder:
         output_parameters.ltp_lags = ltp_lags
         output_parameters.ltp_taps = ltp_taps
         output_parameters.ltp_variances = ltp_variances
+        if self._return_short_term_residual:
+            output_parameters.current_frame_short_term_res = current_frame_short_term_res
         output_parameters.current_frame_long_term_res = current_frame_long_term_res
 
         return output_parameters
