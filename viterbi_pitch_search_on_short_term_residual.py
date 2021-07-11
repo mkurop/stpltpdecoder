@@ -317,11 +317,11 @@ class ViterbiLtpParametersTrajectories:
 
         hypotheses_list_4th_pruned = self.histogram_pruning(hypotheses_list_4th)
 
-        ltp_lags = np.zeros((self._n_best, self._subframes))
+        ltp_lags = np.zeros((self._n_best, self._subframes), dtype=np.uint32)
 
-        ltp_taps = np.zeros((self._n_best, self._subframes))
+        ltp_taps = np.zeros((self._n_best, self._subframes), dtype=np.float32)
 
-        ltp_variances = np.zeros((self._n_best, self._subframes))
+        ltp_variances = np.zeros((self._n_best, self._subframes), dtype=np.float32)
 
         costs = np.zeros((self._n_best,))
 
@@ -367,7 +367,7 @@ class ViterbiLtpParametersTrajectories:
 
             end = int((i+1)*self._subframe_length)
 
-            excitation[start:end] = (self._full_short_term_residual[self._L_max+start:self._L_max+end] + ltp_taps[0,i] * self._full_short_term_residual[self._L_max-ltp_lags[0,i] + start:self._L_max-ltp_lags[0,i]+end])/np.sqrt(ltp_variances[0,i])
+            excitation[start:end] = (self._full_short_term_residual[int(self._L_max+start):int(self._L_max+end)] + ltp_taps[0,i] * self._full_short_term_residual[int(self._L_max-ltp_lags[0,i] + start):int(self._L_max-ltp_lags[0,i]+end)])/np.sqrt(ltp_variances[0,i])
 
         return ltp_taps, ltp_lags, ltp_variances, excitation, costs
 
