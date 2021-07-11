@@ -363,7 +363,7 @@ class ViterbiLtpParametersTrajectories:
 
         for i in range(self._subframes):
 
-            excitation[i*self._subframe_length:(i+1)*self._subframe_length] = self._full_short_term_residual[self._L_max+i*self._subframe_length:self._L_max+(i+1)*self._subframe_length] + ltp_taps[i] * self._full_short_term_residual[self._L_max-ltp_lags[i] + i*self._subframe_length:self._L_max-ltp_lags[i]+(i+1)*self._subframe_length]/np.sqrt(ltp_variances[i])
+            excitation[i*self._subframe_length:(i+1)*self._subframe_length] = (self._full_short_term_residual[self._L_max+i*self._subframe_length:self._L_max+(i+1)*self._subframe_length] + ltp_taps[0,i] * self._full_short_term_residual[self._L_max-ltp_lags[0,i] + i*self._subframe_length:self._L_max-ltp_lags[0,i]+(i+1)*self._subframe_length])/np.sqrt(ltp_variances[0,i])
 
         return ltp_taps, ltp_lags, ltp_variances, excitation, costs
 
