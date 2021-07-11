@@ -104,7 +104,7 @@ spec_viterbi_ltp_parameters_trajectories = [
     ('_n_best', uint32),
 ]
 
-@jitclass(spec_viterbi_ltp_parameters_trajectories)
+#  @jitclass(spec_viterbi_ltp_parameters_trajectories)
 class ViterbiLtpParametersTrajectories:
     """ViterbiLtpParametersTrajectories."""
 
